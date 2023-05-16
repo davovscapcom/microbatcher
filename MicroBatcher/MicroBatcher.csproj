@@ -1,0 +1,19 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net7.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Content Include="IMicroBatcher.cs" />
+    <Content Include="MicroBatcher.cs" />
+    <Content Include="Models\Job.cs" />
+    <Content Include="Models\JobResult.cs" />
+    <Content Include="Models\MicroBatcherConfig.cs" />
+    <Content Include="Models\BatchJob.cs" />
+    <Content Include="Dependencies\BatchProcessorResponse.cs" />
+    <Content Include="Dependencies\IBatchProcessor.cs" />
+    <Content Include="Dependencies\BatchProcessor.cs" />
+  </ItemGroup>
+</Project>
