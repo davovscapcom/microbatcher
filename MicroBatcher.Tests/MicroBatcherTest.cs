@@ -1,7 +1,8 @@
-namespace MicroBatcher.Tests;
-
 using FluentAssertions;
 
+namespace MicroBatcher.Tests;
+
+[Collection("Sequential")]
 public class MicroBatcherTest 
 {
 	//[Fact]
@@ -23,12 +24,8 @@ public class MicroBatcherTest
 	[Fact]
 	public async void SubmitJobAsync_ValidJobGiven_ShouldAddToJobsList()
 	{
-		MicroBatcher batcher = new();
-
-		Job job = new Job()
-		{
-			Id = 1
-		};
+		MicroBatcherConfig config = new() { BatchSize = 5 };
+		MicroBatcher batcher = new(config);
 
 		var batchJob1 = batcher.SubmitJob(new() { Id = 1 });
 		batcher.SubmitJob(new() { Id = 2 });

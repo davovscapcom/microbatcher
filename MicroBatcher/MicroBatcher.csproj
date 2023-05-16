@@ -15,5 +15,6 @@
     <Content Include="Dependencies\BatchProcessorResponse.cs" />
     <Content Include="Dependencies\IBatchProcessor.cs" />
     <Content Include="Dependencies\BatchProcessor.cs" />
+    <Content Include="Constants.cs" />
   </ItemGroup>
 </Project>

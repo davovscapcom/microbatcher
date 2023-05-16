@@ -1,5 +1,6 @@
 ﻿using System.Timers;
 using BatchProcessor;
+using MicroBatcher.Constants;
 
 namespace MicroBatcher;
 
@@ -41,19 +42,22 @@ public class MicroBatcher : IMicroBatcher
     /// </summary>
 	private readonly Dictionary<int, TaskCompletionSource<JobResult>> JobResultMap = new();
 
-	private IBatchProcessor BatchProcessor { get; set; }
+	private IBatchProcessor BatchProcessor { get; set; } = new BatchProcessor.BatchProcessor();
 
 
 	/// <summary>
-    /// Creates a new instance of MicroBatcher.
-    /// 
-    /// MicroBatcher will be configured using environment variables, or fallback to default
-    /// configuration if no environment variables are available.
-    /// </summary>
+	/// Creates a new instance of MicroBatcher.
+	/// 
+	/// MicroBatcher will be configured using environment variables, or fallback to default
+	/// configuration if no environment variables are available.
+	/// </summary>
 	public MicroBatcher()
 	{
-		BatchProcessor = new BatchProcessor.BatchProcessor();
-		// TODO: Load config from ENV
+		if (uint.TryParse(Environment.GetEnvironmentVariable(EnvironmentVariables.BatchSize), out uint batchSize))
+			BatchSize = batchSize;
+
+		if (double.TryParse(Environment.GetEnvironmentVariable(EnvironmentVariables.BatchInterval), out double batchInterval))
+			BatchInterval.Interval = batchInterval;
 	}
 
 
@@ -79,7 +83,7 @@ public class MicroBatcher : IMicroBatcher
 	}
 
 	/// <summary>
-    /// Submit a job to be processed at the next configured interval.
+    /// Submit a job, which will be processed at the next configured interval.
     /// </summary>
     /// <param name="job">The job to be processed. Must have a unique ID.</param>
     /// <returns>Job Result task that will resolve once the batch containing this
@@ -112,6 +116,7 @@ public class MicroBatcher : IMicroBatcher
 	#region Private Methods
 	/// <summary>
 	/// Submits all jobs within the current batch for processing.
+	/// TODO: Move this into it's own service
 	/// </summary>
 	private async void SubmitBatchForProcessing(Guid batchId)
 	{
