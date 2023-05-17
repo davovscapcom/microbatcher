@@ -18,9 +18,9 @@ you must set the following environment variables:
 | Variable Name				         | Default Value |
 |------------------------------|---------------|
 | MICROBATCHER__MAXBATCHSIZE   | 32            |
-| MICROBATCHER__BATCHINTERVAL* | 20_0000       |
+| MICROBATCHER__BATCHINTERVAL  | 20_0000       |
 
-*Interval time in milliseconds.
+*Interval time is in milliseconds.
 
 ## Usage
 Submit a Job using SubmitJob(Job). Your job will be processed at the next
