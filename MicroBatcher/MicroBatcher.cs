@@ -60,7 +60,7 @@ public class MicroBatcher : IMicroBatcher
 	/// <summary>
     /// Submit a job, which will be processed at the next configured interval.
     /// </summary>
-    /// <param name="job">The job to be processed. Must have a unique ID.</param>
+    /// <param name="job">The job to be processed.</param>
     /// <returns>Job Result task that will resolve once the batch containing this
     /// job is processed.</returns>
 	public Task<JobResult>? SubmitJob(Job job)
@@ -99,17 +99,17 @@ public class MicroBatcher : IMicroBatcher
 	}
 
 	/// <summary>
-	/// Submits all jobs within the current batch for processing.
+	/// Attempts to submmit the next 'BatchSize' jobs for processing.
 	///
-    /// If the job queue contains fewer jobs than the configured batch size,
-    /// then all jobs within the job queue will be sent for processing.
+        /// If the job queue contains fewer jobs than the configured batch size,
+        /// then all jobs within the job queue will be sent for processing.
 	/// </summary>
 	private async void SubmitBatchForProcessing()
 	{
-		_logger.LogInformation("Submitting batch for processing");
-
 		if (JobQueue.IsEmpty)
 			return;
+			
+		_logger.LogInformation("Submitting batch for processing");
 
 		// Continuously dequeue jobs from our JobQueue
 		var batch = new List<KeyValuePair<int, BatchJob>>();
@@ -143,7 +143,7 @@ public class MicroBatcher : IMicroBatcher
 
 	/// <summary>
 	/// This method will continuously run until all jobs from the job queue have been
-    /// processed.
+	/// processed.
 	/// </summary>
 	private void ProcessAllRemainingJobs()
 	{
