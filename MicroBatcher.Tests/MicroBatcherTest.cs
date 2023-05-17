@@ -1,55 +1,50 @@
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 
 namespace MicroBatcher.Tests;
 
 [Collection("Sequential")]
 public class MicroBatcherTest 
 {
-	//[Fact]
-	//public void MicroBatcher_UponCreation_ShouldContainNoJobs()
-	//{
-	//   // TODO: Move batcher instantiation to fixture.
-	//	MicroBatcher batcher = new();
-	//	batcher.Jobs.Should().HaveCount(0);
-	//}
+	private readonly ILogger<MicroBatcher> _logger;
+	private readonly MicroBatcher _batcher;
 
-	//[Fact]
-	//public void SubmitJob_ValidJobGiven_ShouldAddToJobsList()
-	//{
-	//	MicroBatcher batcher = new();
-	//	batcher.SubmitJob(new Job());
-	//	batcher.Jobs.Should().HaveCount(1);
-	//}
+	public MicroBatcherTest()
+	{
+		using var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
+		_logger = loggerFactory.CreateLogger<MicroBatcher>();
+		_batcher = new(_logger);
+	}
 
 	[Fact]
-	public async void SubmitJobAsync_ValidJobGiven_ShouldAddToJobsList()
+	public void MicroBatcher_UponCreation_ShouldContainNoJobs()
 	{
-		MicroBatcherConfig config = new() { BatchSize = 5 };
-		MicroBatcher batcher = new(config);
+		_batcher.Jobs.Should().HaveCount(0);
+	}
 
-		var batchJob1 = batcher.SubmitJob(new() { Id = 1 });
-		batcher.SubmitJob(new() { Id = 2 });
-		batcher.SubmitJob(new() { Id = 3 });
-		batcher.SubmitJob(new() { Id = 4 });
-		batcher.SubmitJob(new() { Id = 5 });
+	[Fact]
+	public void SubmitJob_ValidJobGiven_ShouldAddToJobsList()
+	{
+		_batcher.SubmitJob(new Job());
+		_batcher.Jobs.Should().HaveCount(1);
+	}
 
-		var result = await batchJob1;
+	[Fact]
+	public async void SubmitJob_JobThresholdExceeded_ShouldProcessJobs()
+	{
+		_batcher.BatchSize = 2;
+		var jobOperation = _batcher.SubmitJob(new Job() { Id = 1 });
+		_batcher.SubmitJob(new Job() { Id = 2 });
 
-		batcher.Jobs.Should().HaveCount(5);
+		JobResult result = await jobOperation;
+
+		result.Should().NotBeNull();
+		result.Status.Should().Equals(JobResultStatus.PROCESSED);
 	}
 
 
 	// Test that microbatcher doesn't submit anything for processing if there is nothing to process
 
-	// Test file for Configuration Options
-	// Ensure intervals, min/max batch size configuration options work correctly when
-	// specified through the constructor, or through ENV.
-	// Maybe use a MicroBatcher configuration class, which can be passed to the constructor,
-	// deserialised from a config file, or built from ENV.
-
-	// Test file for Accepting Jobs
-	// Can accept a single job as required.
-	// Job is added to our list
 
 	// Test file for Submitting Jobs to be processed
 	// Jobs that exist within our list are submitted to the processor at the configured interval.

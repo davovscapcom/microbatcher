@@ -1,6 +1,7 @@
 ﻿using System.Timers;
 using BatchProcessor;
 using MicroBatcher.Constants;
+using Microsoft.Extensions.Logging;
 
 namespace MicroBatcher;
 
@@ -9,17 +10,18 @@ public class MicroBatcher : IMicroBatcher
 	/// <summary>
 	/// List of Jobs to be processed in batches.
 	/// </summary>
-	public List<BatchJob> Jobs { get; set; } = new List<BatchJob>();
+	public List<BatchJob> Jobs { get; private set; } = new List<BatchJob>();
 
 	/// <summary>
 	/// Maximum size of each batch.
 	/// </summary>
-	public uint BatchSize { get; private set; } = 5;
+	public uint BatchSize { get; set; } = Defaults.BatchSize;
 
 	/// <summary>
 	/// A timer for tracking when to send the next batch for processing.
+    /// This timer will only be started if the interval is greater than 1 millisecond
 	/// </summary>
-	public System.Timers.Timer BatchInterval { get; private set; } = new();
+	public System.Timers.Timer BatchInterval { get; private set; } = new(Defaults.BatchIntervalInMilliseconds);
 
 	/// <summary>
 	/// If MicroBatcher is shutting down, it will not accept any more jobs, and will continue
@@ -44,43 +46,28 @@ public class MicroBatcher : IMicroBatcher
 
 	private IBatchProcessor BatchProcessor { get; set; } = new BatchProcessor.BatchProcessor();
 
+	private readonly ILogger _logger;
 
-	/// <summary>
-	/// Creates a new instance of MicroBatcher.
-	/// 
-	/// MicroBatcher will be configured using environment variables, or fallback to default
-	/// configuration if no environment variables are available.
-	/// </summary>
-	public MicroBatcher()
+
+	public MicroBatcher(ILogger<MicroBatcher> logger)
 	{
+		_logger = logger;
+		_logger.LogInformation("Instance of MicroBatcher created.");
+
+		// Configure Microbatcher using environment variables
 		if (uint.TryParse(Environment.GetEnvironmentVariable(EnvironmentVariables.BatchSize), out uint batchSize))
 			BatchSize = batchSize;
 
 		if (double.TryParse(Environment.GetEnvironmentVariable(EnvironmentVariables.BatchInterval), out double batchInterval))
 			BatchInterval.Interval = batchInterval;
-	}
-
-
-	/// <summary>
-	/// Create a new instance of MicroBatcher using configuration specified in 'config'.
-    /// 
-    /// The configuration passed as an argument will override any config specified by
-    /// environment variables.
-	/// </summary>
-	/// <param name="config"></param>
-	public MicroBatcher(MicroBatcherConfig config) : this()
-	{
-		// TODO: Validate config
-
-		BatchSize = (config.BatchSize > 0) ? config.BatchSize : 1;
-
-		if (config.BatchProcessingIntervalMilliseconds > 0)
-		{
-			BatchInterval = new(config.BatchProcessingIntervalMilliseconds);
+		
+		if (BatchInterval.Interval > 1) {
+			_logger.LogTrace("Batch interval timer started");
 			BatchInterval.Elapsed += new ElapsedEventHandler(OnBatchProcessTimerElapsed);
 			BatchInterval.Start();
 		}
 	}
+
 
 	/// <summary>
     /// Submit a job, which will be processed at the next configured interval.
@@ -120,17 +107,29 @@ public class MicroBatcher : IMicroBatcher
 	/// </summary>
 	private async void SubmitBatchForProcessing(Guid batchId)
 	{
-		Console.WriteLine($"Submitting batch for processing");
 		if (Jobs.Count <= 0 || batchId == Guid.Empty)
 			return;
 
+		_logger.LogTrace("Collecting jobs for batch processing.");
 		IEnumerable<Job> batch = Jobs
 			.Where(job => job.BatchId == batchId)
 			.Select(batchJob => batchJob.Job);
 
-		var result = await BatchProcessor.ProcessBatchAsync(batch);
+		_logger.LogInformation($"Passing batch {batchId}, containing {batch.Count()} jobs to processor.");
 
-		foreach (JobResult jobResult in result)
+		List<JobResult> batchProcessorResult = new();
+		try 
+		{
+			batchProcessorResult = await BatchProcessor.ProcessBatchAsync(batch);
+		} 
+		catch (Exception ex)
+		{
+			_logger.LogError("Exception thrown by batch processor: ", ex);
+		}
+
+		_logger.LogInformation($"Batch: {batchId} finished processing.");
+
+		foreach (JobResult jobResult in batchProcessorResult)
 		{
 			TaskCompletionSource<JobResult>? tcs;
 			if (JobResultMap.TryGetValue(jobResult.JobId, out tcs))
@@ -146,6 +145,7 @@ public class MicroBatcher : IMicroBatcher
 
 	private void OnBatchProcessTimerElapsed(object? source, ElapsedEventArgs e)
 	{
+		_logger.LogTrace("Batch processing timer elapsed.");
 		if (!Jobs.Any())
 			return;
 		SubmitBatchForProcessing(CurrentBatchId);
