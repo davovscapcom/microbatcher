@@ -1,16 +1,21 @@
-﻿using System.Timers;
+﻿using System.Collections.Concurrent;
+using System.Timers;
 using BatchProcessor;
 using MicroBatcher.Constants;
 using Microsoft.Extensions.Logging;
 
 namespace MicroBatcher;
 
+/// <summary>
+/// Microbatcher is designed to group submitted jobs together, and coordinate their
+/// processing intervals.
+/// </summary>
 public class MicroBatcher : IMicroBatcher
 {
 	/// <summary>
-	/// List of Jobs to be processed in batches.
+	/// Thread safe queue of BatchJobs.
 	/// </summary>
-	public List<BatchJob> Jobs { get; private set; } = new List<BatchJob>();
+	public readonly ConcurrentQueue<KeyValuePair<int, BatchJob>> JobQueue = new();
 
 	/// <summary>
 	/// Maximum size of each batch.
@@ -29,32 +34,15 @@ public class MicroBatcher : IMicroBatcher
 	/// </summary>
 	public bool IsShuttingDown { get; private set; }
 
-	/// <summary>
-	/// The ID of the batch currently being populated with jobs.
-	/// </summary>
-	private Guid CurrentBatchId { get; set; } = Guid.NewGuid();
-
-	/// <summary>
-    /// This map contains each unresolved JobID, and it's associated JobResult.
-    /// 
-    /// Once a batch is finished processing, the TaskCompletionSource for each job in the
-    /// processed batch populated with the result from the Batch Processor. This resolves 
-    /// the original Task returned from SubmitJob, providing the JobResult to the original
-    /// caller.
-    /// </summary>
-	private readonly Dictionary<int, TaskCompletionSource<JobResult>> JobResultMap = new();
-
-	private IBatchProcessor BatchProcessor { get; set; } = new BatchProcessor.BatchProcessor();
-
 	private readonly ILogger _logger;
+	private readonly IBatchProcessor _batchProcessor;
 
 
-	public MicroBatcher(ILogger<MicroBatcher> logger)
+	public MicroBatcher(ILogger<MicroBatcher> logger, IBatchProcessor batchProcessor)
 	{
 		_logger = logger;
-		_logger.LogInformation("Instance of MicroBatcher created.");
+		_batchProcessor = batchProcessor;
 
-		// Configure Microbatcher using environment variables
 		if (uint.TryParse(Environment.GetEnvironmentVariable(EnvironmentVariables.BatchSize), out uint batchSize))
 			BatchSize = batchSize;
 
@@ -77,82 +65,92 @@ public class MicroBatcher : IMicroBatcher
     /// job is processed.</returns>
 	public Task<JobResult>? SubmitJob(Job job)
 	{
+		_logger.LogTrace("Job submitted");
+
 		if (IsShuttingDown)
-			return null;
+			throw new InvalidOperationException("Jobs cannot be submitted while microbatcher is shutting down.");
 
-		BatchJob batchJob = (BatchJob)job;
-		batchJob.BatchId = CurrentBatchId;
-		Jobs.Add(batchJob);
+		BatchJob batchJob = new(job, new TaskCompletionSource<JobResult>());
+		JobQueue.Enqueue(new(job.Id, batchJob));
 
-		var tcs = new TaskCompletionSource<JobResult>();
-		JobResultMap.Add(job.Id, tcs);
+		if(JobQueue.Count >= BatchSize) 
+			SubmitBatchForProcessing();
 
-		if(IsBatchThresholdReached()) 
-			SubmitBatchForProcessing(CurrentBatchId);
-
-		return tcs.Task;
+		return batchJob.JobTaskCompletionSource.Task;
 	}
 
 	/// <summary>
 	/// Shutdown will return once all submitted Jobs have finished processing.
 	/// </summary>
 	public void Shutdown() {
+		_logger.LogInformation(
+			"Shutting down MicroBatcher. No further jobs will be accepted. Enqueued jobs will be processed.");
 		IsShuttingDown = true;
+		ProcessAllRemainingJobs();
 	}
 
 	#region Private Methods
+	private void OnBatchProcessTimerElapsed(object? source, ElapsedEventArgs e)
+	{
+		_logger.LogInformation("Batch processing timer elapsed.");
+		if (!JobQueue.Any())
+			return;
+		SubmitBatchForProcessing();
+	}
+
 	/// <summary>
 	/// Submits all jobs within the current batch for processing.
-	/// TODO: Move this into it's own service
+	///
+    /// If the job queue contains fewer jobs than the configured batch size,
+    /// then all jobs within the job queue will be sent for processing.
 	/// </summary>
-	private async void SubmitBatchForProcessing(Guid batchId)
+	private async void SubmitBatchForProcessing()
 	{
-		if (Jobs.Count <= 0 || batchId == Guid.Empty)
+		_logger.LogInformation("Submitting batch for processing");
+
+		if (JobQueue.IsEmpty)
 			return;
 
-		_logger.LogTrace("Collecting jobs for batch processing.");
-		IEnumerable<Job> batch = Jobs
-			.Where(job => job.BatchId == batchId)
-			.Select(batchJob => batchJob.Job);
-
-		_logger.LogInformation($"Passing batch {batchId}, containing {batch.Count()} jobs to processor.");
+		// Continuously dequeue jobs from our JobQueue
+		var batch = new List<KeyValuePair<int, BatchJob>>();
+		while (JobQueue.TryDequeue(out var job))
+		{
+			batch.Add(job);
+			if (batch.Count >= BatchSize)
+				break;
+		}
 
 		List<JobResult> batchProcessorResult = new();
 		try 
 		{
-			batchProcessorResult = await BatchProcessor.ProcessBatchAsync(batch);
+			batchProcessorResult = await _batchProcessor.ProcessBatchAsync(batch.Select(j => j.Value.Job));
 		} 
 		catch (Exception ex)
 		{
 			_logger.LogError("Exception thrown by batch processor: ", ex);
 		}
 
-		_logger.LogInformation($"Batch: {batchId} finished processing.");
-
 		foreach (JobResult jobResult in batchProcessorResult)
 		{
-			TaskCompletionSource<JobResult>? tcs;
-			if (JobResultMap.TryGetValue(jobResult.JobId, out tcs))
-			{
-				tcs.SetResult(jobResult);
-				JobResultMap.Remove(jobResult.JobId);
+			var localJob = batch.Where(j => j.Key == jobResult.JobId).FirstOrDefault();
+			if (localJob.Value != null) {
+				localJob.Value.JobTaskCompletionSource.SetResult(jobResult);
 			}
 			else
 				continue;
 		}
 	}
 
-
-	private void OnBatchProcessTimerElapsed(object? source, ElapsedEventArgs e)
+	/// <summary>
+	/// This method will continuously run until all jobs from the job queue have been
+    /// processed.
+	/// </summary>
+	private void ProcessAllRemainingJobs()
 	{
-		_logger.LogTrace("Batch processing timer elapsed.");
-		if (!Jobs.Any())
-			return;
-		SubmitBatchForProcessing(CurrentBatchId);
+		while(JobQueue.Any())
+		{
+			SubmitBatchForProcessing();
+		}
 	}
-
-
-	private bool IsBatchThresholdReached() => 
-		Jobs.Select(job => job.BatchId == CurrentBatchId).Count() >= BatchSize;
 	#endregion
 }
