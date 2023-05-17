@@ -5,8 +5,11 @@ intent is to provide a way of micro-batching *jobs* and submitting them
 for processing at a specified interval.
 
 ## Setup
-When creating the Microbatcher, you must provide an ILogger, and a
-BatchProcessor to the constructor.
+This Microbatcher requires the .NET 7 SDK to build. Once built, reference the
+dll in your project to use the Microbatcher.
+
+When creating a new instance of Microbatcher, you must provide an ILogger, and an
+IBatchProcessor to the constructor.
 
 MicroBatcher can be configured to send batches when a certain Job threshold
 is reached, when a time interval has elapsed, or both. To set these values,
